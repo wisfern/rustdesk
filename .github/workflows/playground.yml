@@ -89,6 +89,7 @@ jobs:
         uses: actions/checkout@v3
         with:
           ref: ${{ matrix.job.ref }}
+          token: ${{ secrets.PERSONAL_TOKEN }}
           submodules: recursive
 
       - name: Import the codesign cert
@@ -250,6 +251,7 @@ jobs:
         uses: actions/checkout@v3
         with:
           ref: ${{ matrix.job.ref }}
+          token: ${{ secrets.PERSONAL_TOKEN }}
           submodules: recursive
 
       - name: Install dependencies
