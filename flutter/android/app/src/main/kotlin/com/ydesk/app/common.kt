@@ -1,4 +1,4 @@
-package com.carriez.flutter_hbb
+package com.ydesk.app
 
 import android.Manifest.permission.*
 import android.annotation.SuppressLint

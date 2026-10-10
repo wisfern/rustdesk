@@ -2372,6 +2372,23 @@ pub fn load_custom_client() {
     }
 }
 
+pub fn load_default_servers() {
+    const DEFAULT_ID_SERVER: &str = "";
+    const DEFAULT_RELAY_SERVER: &str = "";
+    const DEFAULT_API_SERVER: &str = "";
+    const DEFAULT_SERVER_KEY: &str = "";
+    for (key, value) in [
+        (keys::OPTION_CUSTOM_RENDEZVOUS_SERVER, DEFAULT_ID_SERVER),
+        (keys::OPTION_RELAY_SERVER, DEFAULT_RELAY_SERVER),
+        (keys::OPTION_API_SERVER, DEFAULT_API_SERVER),
+        (keys::OPTION_KEY, DEFAULT_SERVER_KEY),
+    ] {
+        if !value.is_empty() && Config::get_option(key).is_empty() {
+            Config::set_option(key.to_owned(), value.to_owned());
+        }
+    }
+}
+
 fn read_custom_client_advanced_settings(
     settings: serde_json::Value,
     map_display_settings: &HashMap<String, &&str>,
