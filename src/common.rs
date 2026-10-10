@@ -2373,10 +2373,22 @@ pub fn load_custom_client() {
 }
 
 pub fn load_default_servers() {
-    const DEFAULT_ID_SERVER: &str = "";
-    const DEFAULT_RELAY_SERVER: &str = "";
-    const DEFAULT_API_SERVER: &str = "";
-    const DEFAULT_SERVER_KEY: &str = "";
+    const DEFAULT_ID_SERVER: &str = match option_env!("YDESK_DEFAULT_ID_SERVER") {
+        Some(v) => v,
+        None => "",
+    };
+    const DEFAULT_RELAY_SERVER: &str = match option_env!("YDESK_DEFAULT_RELAY_SERVER") {
+        Some(v) => v,
+        None => "",
+    };
+    const DEFAULT_API_SERVER: &str = match option_env!("YDESK_DEFAULT_API_SERVER") {
+        Some(v) => v,
+        None => "",
+    };
+    const DEFAULT_SERVER_KEY: &str = match option_env!("YDESK_DEFAULT_SERVER_KEY") {
+        Some(v) => v,
+        None => "",
+    };
     for (key, value) in [
         (keys::OPTION_CUSTOM_RENDEZVOUS_SERVER, DEFAULT_ID_SERVER),
         (keys::OPTION_RELAY_SERVER, DEFAULT_RELAY_SERVER),

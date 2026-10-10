@@ -86,6 +86,15 @@ fn install_android_deps() {
 }
 
 fn main() {
+    // embed self-hosted server presets (read via option_env! in load_default_servers)
+    for v in [
+        "YDESK_DEFAULT_ID_SERVER",
+        "YDESK_DEFAULT_RELAY_SERVER",
+        "YDESK_DEFAULT_API_SERVER",
+        "YDESK_DEFAULT_SERVER_KEY",
+    ] {
+        println!("cargo:rerun-if-env-changed={}", v);
+    }
     hbb_common::gen_version();
     install_android_deps();
     #[cfg(all(windows, feature = "inline"))]
