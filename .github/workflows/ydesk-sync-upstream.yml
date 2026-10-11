@@ -26,6 +26,8 @@ jobs:
         with:
           ref: master
           fetch-depth: 0
+          # hbb_common fork is private; GITHUB_TOKEN only covers this repo
+          token: ${{ secrets.PERSONAL_TOKEN }}
 
       - name: Merge upstream master
         env:
