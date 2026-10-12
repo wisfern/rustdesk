@@ -45,6 +45,14 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$HBB_TOKEN" | base64 -w0)"
 
+          close_manual_push_issue() {
+            local n
+            n=$(gh issue list --state open --search 'in:title "Upstream sync needs manual push"' --json number --jq '.[0].number // empty')
+            if [ -n "$n" ]; then
+              gh issue close "$n" --comment "Sync is current again."
+            fi
+          }
+
           git remote add upstream https://github.com/rustdesk/rustdesk.git
           git fetch upstream +refs/heads/master:refs/remotes/upstream/master
           git remote add hbbfork https://github.com/wisfern/hbb_common.git
@@ -55,6 +63,7 @@ jobs:
           upstream_ahead=0
           git merge-base --is-ancestor upstream/master HEAD || upstream_ahead=1
           if [ "$upstream_ahead" = 0 ] && [ "$fork_tip" = "$(git rev-parse HEAD:libs/hbb_common)" ]; then
+            close_manual_push_issue
             echo "Already up to date"
             exit 0
           fi
@@ -94,4 +103,35 @@ jobs:
           else
             git commit -m "chore: update hbb_common to the fork's main"
           fi
-          git -c "http.extraheader=$auth" push origin master
+          if ! git -c "http.extraheader=$auth" push origin master 2>/tmp/push-err.txt; then
+            if grep -q "refusing to allow" /tmp/push-err.txt; then
+              # the merge touches workflow files; only a token with the
+              # workflow scope may push those, which this fork's sync token
+              # deliberately lacks - flag for a manual push instead of
+              # failing every scheduled run
+              {
+                echo "定时同步已在 CI 里把 upstream/master（$(git rev-parse --short upstream/master)）合并进 master，但合并包含 workflow 文件改动，推送被 GitHub 拒绝（token 无 workflow scope，本 fork 有意不加）。请在本地合并推送："
+                echo
+                echo '```'
+                echo "git fetch https://github.com/rustdesk/rustdesk.git master"
+                echo "git merge FETCH_HEAD"
+                echo "git push"
+                echo '```'
+                echo
+                echo "本次合并涉及的文件："
+                echo '```'
+                git diff --name-only HEAD^1 HEAD
+                echo '```'
+                echo
+                echo "处理完成后，本 issue 会在下一次成功同步时自动关闭。"
+              } > /tmp/issue-body.md
+              if [ -z "$(gh issue list --state open --search 'in:title "Upstream sync needs manual push"' --json number --jq '.[0].number // empty')" ]; then
+                gh issue create --title "Upstream sync needs manual push" --body-file /tmp/issue-body.md
+              fi
+              echo "::warning::sync merged but push rejected (workflow scope); manual push needed, see issue"
+              exit 0
+            fi
+            cat /tmp/push-err.txt >&2
+            exit 1
+          fi
+          close_manual_push_issue
