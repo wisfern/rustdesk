@@ -26,12 +26,15 @@ jobs:
         with:
           ref: master
           fetch-depth: 0
-          # hbb_common fork is private; GITHUB_TOKEN only covers this repo
-          token: ${{ secrets.PERSONAL_TOKEN }}
 
       - name: Merge upstream master
         env:
           GH_TOKEN: ${{ github.token }}
+          # hbb_common fork is private; GITHUB_TOKEN only covers this repo.
+          # The PAT is scoped to that URL below, so pushes to this repo stay
+          # on GITHUB_TOKEN - a PAT without the workflow scope cannot push
+          # workflow file changes, which every upstream merge may bring.
+          HBB_TOKEN: ${{ secrets.PERSONAL_TOKEN }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
@@ -40,7 +43,8 @@ jobs:
           git remote add upstream https://github.com/rustdesk/rustdesk.git
           git fetch upstream +refs/heads/master:refs/remotes/upstream/master
           git remote add hbbfork https://github.com/wisfern/hbb_common.git
-          git fetch hbbfork +refs/heads/main:refs/remotes/hbbfork/main
+          git -c "http.https://github.com/wisfern/hbb_common.git.extraheader=AUTHORIZATION: basic $(printf 'x-access-token:%s' "$HBB_TOKEN" | base64 -w0)" \
+            fetch hbbfork +refs/heads/main:refs/remotes/hbbfork/main
           fork_tip=$(git rev-parse hbbfork/main)
 
           upstream_ahead=0
