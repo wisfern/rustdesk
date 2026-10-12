@@ -34,20 +34,21 @@ jobs:
       - name: Merge upstream master
         env:
           GH_TOKEN: ${{ github.token }}
-          # hbb_common fork is private; GITHUB_TOKEN only covers this repo,
-          # so its fetch carries a PAT header while pushes carry GITHUB_TOKEN
+          # The PAT handles all authenticated git traffic: the hbb_common
+          # fork is private (GITHUB_TOKEN only covers this repo), and pushes
+          # touching workflow files are only accepted from a token with the
+          # workflow scope - neither GITHUB_TOKEN nor a scopeless PAT can
           HBB_TOKEN: ${{ secrets.PERSONAL_TOKEN }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          origin_auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
-          hbb_auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$HBB_TOKEN" | base64 -w0)"
+          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$HBB_TOKEN" | base64 -w0)"
 
           git remote add upstream https://github.com/rustdesk/rustdesk.git
           git fetch upstream +refs/heads/master:refs/remotes/upstream/master
           git remote add hbbfork https://github.com/wisfern/hbb_common.git
-          git -c "http.extraheader=$hbb_auth" \
+          git -c "http.extraheader=$auth" \
             fetch hbbfork +refs/heads/main:refs/remotes/hbbfork/main
           fork_tip=$(git rev-parse hbbfork/main)
 
@@ -93,4 +94,4 @@ jobs:
           else
             git commit -m "chore: update hbb_common to the fork's main"
           fi
-          git -c "http.extraheader=$origin_auth" push origin master
+          git -c "http.extraheader=$auth" push origin master
