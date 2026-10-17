@@ -45,6 +45,15 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$HBB_TOKEN" | base64 -w0)"
 
+          # gh runs on the GITHUB_TOKEN: the PAT carries no issue permissions,
+          # and the persisted credentials are off, so it would fail with
+          # "Resource not accessible by integration"
+          open_issue() {
+            local title="$1"
+            if [ -z "$(gh issue list --state open --search "in:title \"$title\"" --json number --jq '.[0].number // empty')" ]; then
+              gh issue create --title "$title" --body-file /tmp/issue-body.md
+            fi
+          }
           close_manual_push_issue() {
             local n
             n=$(gh issue list --state open --search 'in:title "Upstream sync needs manual push"' --json number --jq '.[0].number // empty')
@@ -70,13 +79,14 @@ jobs:
 
           if [ "$upstream_ahead" = 1 ]; then
             if ! git merge upstream/master --no-edit --no-commit; then
-              conflicted="$(git diff --name-only --diff-filter=U)"
-              if [ "$conflicted" != "libs/hbb_common" ]; then
+              # the only expected conflict is the submodule pointer: the
+              # fork pins it to its own main, whose sync runs 30 min earlier
+              if [ "$(git diff --name-only --diff-filter=U)" != "libs/hbb_common" ]; then
                 git merge --abort || true
                 {
                   echo "Merging upstream/master $(git rev-parse --short upstream/master) conflicts with local changes in:"
                   echo '```'
-                  echo "$conflicted"
+                  git diff --name-only --diff-filter=U
                   echo '```'
                   echo "Resolve locally and push; the next scheduled run continues from there:"
                   echo '```'
@@ -85,9 +95,7 @@ jobs:
                   echo "# resolve conflicts, then: git commit && git push"
                   echo '```'
                 } > /tmp/issue-body.md
-                if [ -z "$(gh issue list --state open --search 'in:title "Upstream sync failed"' --json number --jq '.[0].number // empty')" ]; then
-                  gh issue create --title "Upstream sync failed" --body-file /tmp/issue-body.md
-                fi
+                open_issue "Upstream sync failed"
                 echo "::error::merge conflict with upstream/master"
                 exit 1
               fi
@@ -125,9 +133,7 @@ jobs:
                 echo
                 echo "处理完成后，本 issue 会在下一次成功同步时自动关闭。"
               } > /tmp/issue-body.md
-              if [ -z "$(gh issue list --state open --search 'in:title "Upstream sync needs manual push"' --json number --jq '.[0].number // empty')" ]; then
-                gh issue create --title "Upstream sync needs manual push" --body-file /tmp/issue-body.md
-              fi
+                open_issue "Upstream sync needs manual push"
               echo "::warning::sync merged but push rejected (workflow scope); manual push needed, see issue"
               exit 0
             fi
