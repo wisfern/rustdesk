@@ -62,20 +62,29 @@ jobs:
 
           note "## 上游有变更待手工合并"
           note
+          # Diff against the merge base, not against HEAD: comparing trees
+          # directly reports the fork's own divergences (the com.ydesk.app
+          # rename, fork-only lang keys) as if upstream had changed them.
+          base=""
           if [ "$upstream_ahead" = 1 ]; then
+            base=$(git merge-base HEAD upstream/master)
             commits=$(git rev-list --count HEAD..upstream/master)
             note "upstream/master 领先 ${commits} 个提交（$(git rev-parse --short upstream/master)）："
             note
             code git log --oneline HEAD..upstream/master
             note
-            note "### 变更文件"
-            code git diff --name-status HEAD upstream/master
+            note "### 上游变更的文件"
+            code git diff --name-status "$base" upstream/master
           else
             commits=0
           fi
 
-          android=$(git diff --name-only HEAD upstream/master -- flutter/android libs/scrap/src/android || true)
-          android_other=$(git diff --name-only HEAD upstream/master | grep -E '^(.*\.(kt|java|gradle|pro)$|.*AndroidManifest\.xml$)' || true)
+          android=""
+          android_other=""
+          if [ -n "$base" ]; then
+            android=$(git diff --name-only "$base" upstream/master -- flutter/android libs/scrap/src/android || true)
+            android_other=$(git diff --name-only "$base" upstream/master | grep -E '^(.*\.(kt|java|gradle|pro)$|.*AndroidManifest\.xml$)' || true)
+          fi
           android_files=$(printf '%s\n%s\n' "$android" "$android_other" | sed '/^$/d' | sort -u)
           android_n=0
           if [ -n "$android_files" ]; then
