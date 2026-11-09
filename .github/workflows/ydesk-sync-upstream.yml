@@ -1,9 +1,15 @@
 name: YDesk sync upstream
 
-# Auto-merge rustdesk/rustdesk master into this fork so it keeps following
-# upstream. The hbb_common submodule is pinned to the wisfern/hbb_common
-# fork's main (whose own sync runs 30 minutes earlier), not to upstream's
-# pointer: only the fork carries our server config constants.
+# Upstream sync is manual by design. This fork renames the Android package
+# (com.carriez.flutter_hbb -> com.ydesk.app) and carries its own signing
+# fingerprints, so upstream changes to Android sources have to be reconciled
+# by hand or the rename conflicts. The hbb_common submodule is likewise pinned
+# to the wisfern/hbb_common fork's main (whose own sync runs 30 minutes
+# earlier), not to upstream's pointer: only the fork carries our server config
+# constants.
+#
+# So this workflow never merges and never pushes - it only reports what is
+# pending. A failing run means "merge upstream locally, then push".
 
 on:
   schedule:
@@ -11,14 +17,13 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
-  issues: write
+  contents: read
 
 concurrency:
   group: ydesk-sync-upstream
 
 jobs:
-  sync:
+  check:
     if: github.repository == 'wisfern/rustdesk'
     runs-on: ubuntu-latest
     steps:
@@ -26,118 +31,108 @@ jobs:
         with:
           ref: master
           fetch-depth: 0
-          # auth headers are passed per git command below; a persisted
-          # repo-wide header would be sent twice together with the scoped
-          # one (http.<url>.extraheader is multi-valued) and GitHub 400s
           persist-credentials: false
 
-      - name: Merge upstream master
+      - name: Report pending upstream changes
         env:
-          GH_TOKEN: ${{ github.token }}
-          # The PAT handles all authenticated git traffic: the hbb_common
-          # fork is private (GITHUB_TOKEN only covers this repo), and pushes
-          # touching workflow files are only accepted from a token with the
-          # workflow scope - neither GITHUB_TOKEN nor a scopeless PAT can
+          # The hbb_common fork is private, so GITHUB_TOKEN cannot read it.
           HBB_TOKEN: ${{ secrets.PERSONAL_TOKEN }}
         run: |
           set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$HBB_TOKEN" | base64 -w0)"
-
-          # gh runs on the GITHUB_TOKEN: the PAT carries no issue permissions,
-          # and the persisted credentials are off, so it would fail with
-          # "Resource not accessible by integration"
-          open_issue() {
-            local title="$1"
-            if [ -z "$(gh issue list --state open --search "in:title \"$title\"" --json number --jq '.[0].number // empty')" ]; then
-              gh issue create --title "$title" --body-file /tmp/issue-body.md
-            fi
-          }
-          close_manual_push_issue() {
-            local n
-            n=$(gh issue list --state open --search 'in:title "Upstream sync needs manual push"' --json number --jq '.[0].number // empty')
-            if [ -n "$n" ]; then
-              gh issue close "$n" --comment "Sync is current again."
-            fi
-          }
+          report=/tmp/report.md
+          : > "$report"
+          note() { printf '%s\n' "$*" >> "$report"; }
+          code() { note '```'; "$@" >> "$report"; note '```'; }
 
           git remote add upstream https://github.com/rustdesk/rustdesk.git
-          git fetch upstream +refs/heads/master:refs/remotes/upstream/master
+          git fetch --quiet upstream +refs/heads/master:refs/remotes/upstream/master
           git remote add hbbfork https://github.com/wisfern/hbb_common.git
           git -c "http.extraheader=$auth" \
-            fetch hbbfork +refs/heads/main:refs/remotes/hbbfork/main
+            fetch --quiet hbbfork +refs/heads/main:refs/remotes/hbbfork/main
           fork_tip=$(git rev-parse hbbfork/main)
+          pinned=$(git rev-parse HEAD:libs/hbb_common)
 
           upstream_ahead=0
           git merge-base --is-ancestor upstream/master HEAD || upstream_ahead=1
-          if [ "$upstream_ahead" = 0 ] && [ "$fork_tip" = "$(git rev-parse HEAD:libs/hbb_common)" ]; then
-            close_manual_push_issue
-            echo "Already up to date"
+          if [ "$upstream_ahead" = 0 ] && [ "$fork_tip" = "$pinned" ]; then
+            echo "Already up to date with upstream/master and the hbb_common fork."
             exit 0
           fi
 
+          note "## 上游有变更待手工合并"
+          note
           if [ "$upstream_ahead" = 1 ]; then
-            if ! git merge upstream/master --no-edit --no-commit; then
-              # the only expected conflict is the submodule pointer: the
-              # fork pins it to its own main, whose sync runs 30 min earlier
-              if [ "$(git diff --name-only --diff-filter=U)" != "libs/hbb_common" ]; then
-                git merge --abort || true
-                {
-                  echo "Merging upstream/master $(git rev-parse --short upstream/master) conflicts with local changes in:"
-                  echo '```'
-                  git diff --name-only --diff-filter=U
-                  echo '```'
-                  echo "Resolve locally and push; the next scheduled run continues from there:"
-                  echo '```'
-                  echo "git fetch https://github.com/rustdesk/rustdesk.git master"
-                  echo "git merge FETCH_HEAD"
-                  echo "# resolve conflicts, then: git commit && git push"
-                  echo '```'
-                } > /tmp/issue-body.md
-                open_issue "Upstream sync failed"
-                echo "::error::merge conflict with upstream/master"
-                exit 1
-              fi
-            fi
+            commits=$(git rev-list --count HEAD..upstream/master)
+            note "upstream/master 领先 ${commits} 个提交（$(git rev-parse --short upstream/master)）："
+            note
+            code git log --oneline HEAD..upstream/master
+            note
+            note "### 变更文件"
+            code git diff --name-status HEAD upstream/master
+          else
+            commits=0
           fi
 
-          # upstream's submodule pointer targets rustdesk/hbb_common, which
-          # lacks our server config constants; pin the fork's main instead
-          # (this also resolves the expected gitlink conflict)
-          git update-index --cacheinfo 160000,"$fork_tip",libs/hbb_common
-          if [ -e "$(git rev-parse --git-dir)/MERGE_HEAD" ]; then
-            git commit --no-edit
-          else
-            git commit -m "chore: update hbb_common to the fork's main"
+          android=$(git diff --name-only HEAD upstream/master -- flutter/android libs/scrap/src/android || true)
+          android_other=$(git diff --name-only HEAD upstream/master | grep -E '^(.*\.(kt|java|gradle|pro)$|.*AndroidManifest\.xml$)' || true)
+          android_files=$(printf '%s\n%s\n' "$android" "$android_other" | sed '/^$/d' | sort -u)
+          android_n=0
+          if [ -n "$android_files" ]; then
+            android_n=$(printf '%s\n' "$android_files" | wc -l)
+            note
+            note "### :warning: 涉及安卓源码（${android_n} 个文件）"
+            note "本 fork 的包名是 com.ydesk.app、指纹也是自己的，合并后要手工对齐："
+            code printf '%s\n' "$android_files"
           fi
-          if ! git -c "http.extraheader=$auth" push origin master 2>/tmp/push-err.txt; then
-            if grep -q "refusing to allow" /tmp/push-err.txt; then
-              # the merge touches workflow files; only a token with the
-              # workflow scope may push those, which this fork's sync token
-              # deliberately lacks - flag for a manual push instead of
-              # failing every scheduled run
-              {
-                echo "定时同步已在 CI 里把 upstream/master（$(git rev-parse --short upstream/master)）合并进 master，但合并包含 workflow 文件改动，推送被 GitHub 拒绝（token 无 workflow scope，本 fork 有意不加）。请在本地合并推送："
-                echo
-                echo '```'
-                echo "git fetch https://github.com/rustdesk/rustdesk.git master"
-                echo "git merge FETCH_HEAD"
-                echo "git push"
-                echo '```'
-                echo
-                echo "本次合并涉及的文件："
-                echo '```'
-                git diff --name-only HEAD^1 HEAD
-                echo '```'
-                echo
-                echo "处理完成后，本 issue 会在下一次成功同步时自动关闭。"
-              } > /tmp/issue-body.md
-                open_issue "Upstream sync needs manual push"
-              echo "::warning::sync merged but push rejected (workflow scope); manual push needed, see issue"
-              exit 0
+
+          pin_changed=0
+          if [ "$fork_tip" != "$pinned" ]; then
+            pin_changed=1
+            note
+            note "### hbb_common 指针"
+            note "fork main 已到 \`${fork_tip}\`，父仓库还钉在 \`${pinned}\`，合并后需重钉。"
+          fi
+
+          conflict_state=""
+          if [ "$upstream_ahead" = 1 ]; then
+            note
+            note "### 预合并"
+            if git merge --no-commit --no-ff upstream/master >/tmp/preview.txt 2>&1; then
+              note "无冲突。"
+            else
+              conflicts=$(git diff --name-only --diff-filter=U || true)
+              if [ -n "$conflicts" ]; then
+                note "有冲突："
+                code printf '%s\n' "$conflicts"
+              else
+                note "预合并失败，输出如下："
+                code cat /tmp/preview.txt
+              fi
             fi
-            cat /tmp/push-err.txt >&2
-            exit 1
+            git merge --abort >/dev/null 2>&1 || true
           fi
-          close_manual_push_issue
+
+          note
+          note "### 手工合并"
+          note '```'
+          note "git fetch https://github.com/rustdesk/rustdesk.git master"
+          note "git merge FETCH_HEAD"
+          note "git fetch https://github.com/wisfern/hbb_common.git main:hbbfork-main"
+          note "git update-index --cacheinfo 160000,${fork_tip},libs/hbb_common"
+          note "git commit --amend --no-edit   # 没有 MERGE_HEAD 时用 git commit"
+          note "git push"
+          note '```'
+
+          cat "$report"
+          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+
+          msg="${commits} 个上游提交待合并"
+          if [ "$android_n" -gt 0 ]; then
+            msg="${msg}；${android_n} 个安卓相关文件需要手工对齐包名"
+          fi
+          if [ "$pin_changed" = 1 ]; then
+            msg="${msg}；hbb_common 指针落后"
+          fi
+          echo "::error::${msg}。同步是手动的：请在本地合并并推送，详见 step summary"
+          exit 1
