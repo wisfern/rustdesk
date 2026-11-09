@@ -13,7 +13,9 @@ name: YDesk sync upstream
 
 on:
   schedule:
-    - cron: "43 */6 * * *"
+    # 01:00 UTC = 09:00 Asia/Shanghai, so a pending merge shows up at the
+    # start of the working day instead of waking everyone up four times.
+    - cron: "0 1 * * *"
   workflow_dispatch:
 
 permissions:
