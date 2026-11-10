@@ -34,6 +34,35 @@ workspace member. `base::config::keys` re-exports the handful of keys
   - Mobile: `flutter/lib/mobile/`
   - Shared: `flutter/lib/common/` and `flutter/lib/models/`
 
+## Upstream merges (YDesk fork)
+
+This fork renames the Android Kotlin package `com.carriez.flutter_hbb` to
+`com.ydesk.app` (and carries its own signing fingerprints and server
+constants). Upstream is merged locally, never by CI, so every merge must be
+reconciled against those renames by hand. The rename points that the compiler
+will NOT catch:
+
+* **Bare JNI exports in Rust.** A `#[no_mangle] pub extern "system" fn
+  Java_com_carriez_flutter_1hbb_...` symbol spells the runtime class name and
+  must be renamed along with the package (e.g. `Java_com_ydesk_app_...`).
+  Missing one builds fine but crashes at startup with `UnsatisfiedLinkError`.
+  After every merge: `grep -rn "Java_com" src/ libs/`. This shipped broken in
+  1.5.3 (`DocumentLogs_setEnabled`, fixed in 82b305544).
+* Class-name strings outside the Kotlin tree: entries in
+  `AndroidManifest.xml` (providers, authorities) and hard-coded
+  `com.carriez.flutter_hbb` strings in Kotlin or Rust.
+* `strings.xml`'s `app_name` still reads "RustDesk"; whether to rebrand it is
+  the maintainer's call, not part of a merge.
+
+Runtime verification after an Android-touching merge: boot the local emulator
+(`emulator -avd yikool-ref -no-window -gpu swiftshader_indirect`), install the
+APK, `adb shell am start -n com.ydesk.app/.MainActivity`, then check
+`adb logcat -d -b crash`.
+
+When merging, also keep the `libs/hbb_common` gitlink pinned to the
+wisfern/hbb_common fork's main (the sync workflow prints the exact commands);
+upstream's pointer lacks the fork's server constants.
+
 ## Rust Rules
 
 * Avoid `unwrap()` / `expect()` in production code.
