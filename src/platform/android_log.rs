@@ -26,7 +26,9 @@ const DEFAULT_LOG_FILE_COUNT: usize = 90;
 static PUBLIC_LOGS_ENABLED: AtomicBool = AtomicBool::new(true);
 
 #[no_mangle]
-pub extern "system" fn Java_com_carriez_flutter_1hbb_DocumentLogs_setEnabled(
+// The JNI symbol must spell the Kotlin class's runtime package, which this
+// fork renames to com.ydesk.app (upstream: com.carriez.flutter_hbb).
+pub extern "system" fn Java_com_ydesk_app_DocumentLogs_setEnabled(
     _env: jni::JNIEnv,
     _instance: jni::objects::JObject,
     enabled: jni::sys::jboolean,
